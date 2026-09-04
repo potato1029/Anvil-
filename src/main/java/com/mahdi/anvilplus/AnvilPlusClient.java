@@ -350,7 +350,6 @@ public class AnvilPlusClient implements ClientModInitializer {
         var bookEnchants = EnchantmentHelper.getEnchantments(book);
 
         for (RegistryEntry<Enchantment> entry : bookEnchants.getEnchantments()) {
-            Identifier id = Registries.ENCHANTMENT.getId(entry.value());
 
             if (!isAllowed(id)) {
                 continue;
