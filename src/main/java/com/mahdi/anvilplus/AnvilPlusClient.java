@@ -19,35 +19,14 @@ import net.minecraft.text.Text;
 import net.minecraft.util.Identifier;
 import org.lwjgl.glfw.GLFW;
 
-/**
- * Anvil Plus - Minecraft 1.21.11
- *
- * Client-side automation for Netherite Boots only.
- *
- * The mod:
- * - Only works with Netherite Boots.
- * - Finds boots in both the hotbar and main inventory.
- * - Finds enchanted books in the inventory.
- * - Supports books containing multiple enchantments.
- * - Only considers:
- *   Unbreaking III
- *   Feather Falling IV
- *   Blast Protection IV
- *   Thorns III
- *   Depth Strider III
- *   Mending
- *   Soul Speed III
- *
- * The actual Anvil result is still calculated by Minecraft/server.
- */
 public class AnvilPlusClient implements ClientModInitializer {
 
     private static final String MOD_ID = "anvil_plus";
 
-    // 6 ticks = 300 ms.
+    // 6 ticks = approximately 300 ms
     private static final int ACTION_DELAY_TICKS = 6;
 
-    // Wait a little after opening the Anvil.
+    // Small delay after opening the Anvil
     private static final int OPEN_DELAY_TICKS = 8;
 
     private static final KeyBinding.Category CATEGORY =
@@ -57,8 +36,8 @@ public class AnvilPlusClient implements ClientModInitializer {
 
     private static KeyBinding toggleKey;
 
-    /**
-     * Saved between game launches.
+    /*
+     * ON/OFF state is saved to config/anvil_plus.properties
      */
     private static boolean enabled = true;
 
@@ -100,13 +79,14 @@ public class AnvilPlusClient implements ClientModInitializer {
     private static void tick(MinecraftClient client) {
 
         /*
-         * Toggle ON/OFF.
+         * Toggle ON/OFF
          */
         while (toggleKey.wasPressed()) {
 
             enabled = !enabled;
 
             resetState();
+
             saveConfig();
 
             if (enabled) {
@@ -131,14 +111,18 @@ public class AnvilPlusClient implements ClientModInitializer {
         }
 
         /*
-         * The mod only works while an Anvil is actually open.
+         * Anvil must be open.
+         *
+         * If the player closes the Anvil, automation stops
+         * but the mod remains ON.
          */
         if (!(client.currentScreen instanceof AnvilScreen screen)) {
             resetState();
             return;
         }
 
-        AnvilScreenHandler handler = screen.getScreenHandler();
+        AnvilScreenHandler handler =
+                screen.getScreenHandler();
 
         /*
          * New Anvil screen.
@@ -180,7 +164,26 @@ public class AnvilPlusClient implements ClientModInitializer {
     }
 
     /*
-     * Find the next Netherite Boots and a useful book.
+     * Find a Netherite Boot that actually has a useful
+     * enchanted book available.
+     *
+     * IMPORTANT:
+     *
+     * This is the main fix for the previous bug.
+     *
+     * We don't simply take the first Netherite Boot.
+     * We search for a boot that can actually receive
+     * at least one enchantment.
+     *
+     * Therefore:
+     *
+     * Boot #1 has everything already
+     * -> SKIP
+     *
+     * Boot #2 can receive Mending
+     * -> use Boot #2
+     *
+     * The old boot does NOT need to be dropped.
      */
     private static void startNext(
             MinecraftClient client,
@@ -188,7 +191,8 @@ public class AnvilPlusClient implements ClientModInitializer {
     ) {
 
         /*
-         * Do not touch an Anvil that already contains items.
+         * Never interfere with an Anvil that already
+         * contains items.
          */
         if (!isInputEmpty(handler)) {
 
@@ -202,15 +206,27 @@ public class AnvilPlusClient implements ClientModInitializer {
         }
 
         /*
-         * Find Netherite Boots anywhere in the player's inventory.
+         * Find the FIRST boot that has a useful book.
+         *
+         * This automatically skips boots that are already
+         * fully enchanted or cannot receive anything useful.
          */
-        int bootSlot = findNextBoot(client);
+        int bootSlot =
+                findNextUsableBoot(client);
 
         if (bootSlot < 0) {
 
+            /*
+             * No usable boot at the moment.
+             *
+             * Do NOT turn the mod OFF.
+             *
+             * New boots/books may arrive later, especially
+             * in an AFK setup.
+             */
             actionBar(
                     client,
-                    "Anvil Plus: No Netherite Boots left",
+                    "Anvil Plus: No usable Netherite Boots",
                     0x55FF55
             );
 
@@ -220,23 +236,24 @@ public class AnvilPlusClient implements ClientModInitializer {
         }
 
         ItemStack boot =
-                client.player.getInventory().getStack(bootSlot);
+                client.player.getInventory()
+                        .getStack(bootSlot);
 
         /*
-         * Find a book that actually adds at least one useful enchantment.
+         * Find a useful book specifically for THIS boot.
          */
         int bookSlot =
                 findUsefulBook(client, boot);
 
+        /*
+         * This should normally never happen because
+         * findNextUsableBoot already checked it.
+         *
+         * Still keep the safety check.
+         */
         if (bookSlot < 0) {
 
-            actionBar(
-                    client,
-                    "Anvil Plus: No useful book for this boot",
-                    0xFFAA00
-            );
-
-            delay = 20;
+            delay = 1;
 
             return;
         }
@@ -250,7 +267,7 @@ public class AnvilPlusClient implements ClientModInitializer {
                         .copy();
 
         /*
-         * Move the Netherite Boots into Anvil slot 1.
+         * Put the Netherite Boots into Anvil slot 1.
          */
         clickInventorySlot(
                 client,
@@ -266,7 +283,42 @@ public class AnvilPlusClient implements ClientModInitializer {
     }
 
     /*
-     * Wait until the boots are actually inside the Anvil,
+     * Find a Netherite Boot that has at least one
+     * useful enchantment available.
+     *
+     * This prevents the automation from getting stuck
+     * on a fully-enchanted boot.
+     */
+    private static int findNextUsableBoot(
+            MinecraftClient client
+    ) {
+
+        for (int i = 0;
+             i < client.player.getInventory().size();
+             i++) {
+
+            ItemStack boot =
+                    client.player.getInventory()
+                            .getStack(i);
+
+            if (boot.isEmpty()
+                    || !boot.isOf(Items.NETHERITE_BOOTS)) {
+                continue;
+            }
+
+            /*
+             * Check whether THIS boot has a useful book.
+             */
+            if (findUsefulBook(client, boot) >= 0) {
+                return i;
+            }
+        }
+
+        return -1;
+    }
+
+    /*
+     * Wait until the boots are inside the Anvil,
      * then put the selected book into slot 2.
      */
     private static void putBook(
@@ -289,7 +341,7 @@ public class AnvilPlusClient implements ClientModInitializer {
         }
 
         /*
-         * Find the exact same book again.
+         * Find the exact selected book again.
          */
         int bookSlot =
                 findExactBook(
@@ -309,7 +361,7 @@ public class AnvilPlusClient implements ClientModInitializer {
         }
 
         /*
-         * Move the book into Anvil slot 2.
+         * Put the book into Anvil slot 2.
          */
         clickInventorySlot(
                 client,
@@ -325,7 +377,7 @@ public class AnvilPlusClient implements ClientModInitializer {
     }
 
     /*
-     * Wait until both Anvil input slots are synchronized.
+     * Wait until both inputs are synchronized.
      */
     private static void waitForOutput(
             MinecraftClient client,
@@ -362,7 +414,7 @@ public class AnvilPlusClient implements ClientModInitializer {
     }
 
     /*
-     * Read the actual Anvil output.
+     * Take the actual Anvil output.
      */
     private static void takeOutput(
             MinecraftClient client,
@@ -377,7 +429,7 @@ public class AnvilPlusClient implements ClientModInitializer {
                         .getStack();
 
         /*
-         * No output means the Anvil rejected the operation.
+         * No result.
          */
         if (output.isEmpty()) {
 
@@ -416,7 +468,7 @@ public class AnvilPlusClient implements ClientModInitializer {
                 handler.getLevelCost();
 
         /*
-         * Vanilla Anvil maximum.
+         * Too expensive.
          */
         if (cost > 39) {
 
@@ -444,7 +496,10 @@ public class AnvilPlusClient implements ClientModInitializer {
         }
 
         /*
-         * Take the actual result from the Anvil.
+         * Take the real server-authoritative result.
+         *
+         * QUICK_MOVE puts the finished boot back into
+         * the player's inventory when possible.
          */
         client.interactionManager.clickSlot(
                 handler.syncId,
@@ -468,7 +523,13 @@ public class AnvilPlusClient implements ClientModInitializer {
     }
 
     /*
-     * Wait until the Anvil has completely cleared.
+     * Wait until the Anvil becomes empty.
+     *
+     * After that, IDLE starts another complete inventory scan.
+     *
+     * Therefore the previously enchanted boot is not
+     * automatically selected again unless it genuinely
+     * has another useful enchantment available.
      */
     private static void waitForClear(
             AnvilScreenHandler handler
@@ -513,6 +574,12 @@ public class AnvilPlusClient implements ClientModInitializer {
         selectedBook =
                 ItemStack.EMPTY;
 
+        /*
+         * IMPORTANT:
+         *
+         * Go back to IDLE and perform a completely
+         * fresh inventory scan.
+         */
         stage =
                 Stage.IDLE;
 
@@ -521,35 +588,7 @@ public class AnvilPlusClient implements ClientModInitializer {
     }
 
     /*
-     * Find Netherite Boots anywhere in the inventory.
-     *
-     * Player inventory:
-     * 0-8  = Hotbar
-     * 9-35 = Main inventory
-     */
-    private static int findNextBoot(
-            MinecraftClient client
-    ) {
-
-        for (int i = 0;
-             i < client.player.getInventory().size();
-             i++) {
-
-            ItemStack stack =
-                    client.player.getInventory().getStack(i);
-
-            if (!stack.isEmpty()
-                    && stack.isOf(Items.NETHERITE_BOOTS)) {
-
-                return i;
-            }
-        }
-
-        return -1;
-    }
-
-    /*
-     * Find the exact selected book again.
+     * Find the exact same enchanted book.
      */
     private static int findExactBook(
             MinecraftClient client,
@@ -561,7 +600,8 @@ public class AnvilPlusClient implements ClientModInitializer {
              i++) {
 
             ItemStack stack =
-                    client.player.getInventory().getStack(i);
+                    client.player.getInventory()
+                            .getStack(i);
 
             if (!stack.isEmpty()
                     && stack.isOf(Items.ENCHANTED_BOOK)
@@ -578,9 +618,22 @@ public class AnvilPlusClient implements ClientModInitializer {
     }
 
     /*
-     * Find a book that adds at least one new useful enchantment.
+     * Find a book that can add at least ONE new
+     * allowed enchantment to this Netherite Boot.
      *
-     * Books containing multiple enchantments are allowed.
+     * Multi-enchantment books are supported.
+     *
+     * Example:
+     *
+     * Book:
+     * Unbreaking III + Mending
+     *
+     * Boot:
+     * Unbreaking III
+     *
+     * Result:
+     * The book IS considered useful because
+     * Mending is new.
      */
     private static int findUsefulBook(
             MinecraftClient client,
@@ -592,7 +645,8 @@ public class AnvilPlusClient implements ClientModInitializer {
              i++) {
 
             ItemStack book =
-                    client.player.getInventory().getStack(i);
+                    client.player.getInventory()
+                            .getStack(i);
 
             if (book.isEmpty()
                     || !book.isOf(Items.ENCHANTED_BOOK)) {
@@ -613,13 +667,8 @@ public class AnvilPlusClient implements ClientModInitializer {
     }
 
     /*
-     * Check whether a book contains at least one useful
-     * enchantment that the boots do not already have at
-     * the same or higher level.
-     *
-     * This is intentionally based on RegistryEntry rather
-     * than Registries.ENCHANTMENT, which is not available
-     * in this API version in the way the old code expected.
+     * Determine whether a book has at least one
+     * enchantment that should actually be added.
      */
     private static boolean hasUsefulAllowedEnchantment(
             ItemStack boot,
@@ -636,7 +685,7 @@ public class AnvilPlusClient implements ClientModInitializer {
                 bookEnchants.getEnchantments()) {
 
             /*
-             * Only the seven requested enchantments.
+             * Ignore enchantments outside the requested list.
              */
             if (!isAllowed(entry)) {
                 continue;
@@ -649,25 +698,29 @@ public class AnvilPlusClient implements ClientModInitializer {
                     bootEnchants.getLevel(entry);
 
             /*
-             * If the boot already has the same or
-             * higher level, this enchantment gives
-             * us nothing new.
+             * Existing same or higher level:
+             * DO NOT use the book because of this enchantment.
+             *
+             * Example:
+             *
+             * Boot = Unbreaking III
+             * Book = Unbreaking III
+             *
+             * -> ignored.
              */
             if (bootLevel >= bookLevel) {
                 continue;
             }
 
             /*
-             * Netherite Boots must support the enchantment.
+             * The enchantment must be supported by Netherite Boots.
              */
             if (!entry.value().isSupportedItem(boot)) {
                 continue;
             }
 
             /*
-             * At least one useful enchantment exists.
-             *
-             * This is why multi-enchantment books work.
+             * At least one new useful enchantment exists.
              */
             return true;
         }
@@ -676,7 +729,15 @@ public class AnvilPlusClient implements ClientModInitializer {
     }
 
     /*
-     * Allowed enchantments.
+     * Only these enchantments are allowed.
+     *
+     * Unbreaking III
+     * Feather Falling IV
+     * Blast Protection IV
+     * Thorns III
+     * Depth Strider III
+     * Mending
+     * Soul Speed III
      */
     private static boolean isAllowed(
             RegistryEntry<Enchantment> entry
@@ -692,8 +753,7 @@ public class AnvilPlusClient implements ClientModInitializer {
     }
 
     /*
-     * Convert PlayerInventory slot numbers to
-     * AnvilScreenHandler slot numbers.
+     * Convert PlayerInventory slot to Anvil handler slot.
      *
      * Player inventory:
      *
@@ -719,8 +779,7 @@ public class AnvilPlusClient implements ClientModInitializer {
     }
 
     /*
-     * Move an inventory item into the Anvil
-     * using normal QUICK_MOVE behavior.
+     * Move an inventory item into the Anvil.
      */
     private static void clickInventorySlot(
             MinecraftClient client,
@@ -738,7 +797,7 @@ public class AnvilPlusClient implements ClientModInitializer {
     }
 
     /*
-     * Make sure both Anvil input slots are empty.
+     * Check that Anvil input slots are empty.
      */
     private static boolean isInputEmpty(
             AnvilScreenHandler handler
@@ -760,8 +819,9 @@ public class AnvilPlusClient implements ClientModInitializer {
     }
 
     /*
-     * Stop the automation and permanently turn it OFF
-     * until the user toggles it back ON.
+     * Stop the automation because of a real error.
+     *
+     * ON/OFF state is saved.
      */
     private static void stopWithError(
             MinecraftClient client,
@@ -783,7 +843,9 @@ public class AnvilPlusClient implements ClientModInitializer {
     }
 
     /*
-     * Reset current Anvil operation.
+     * Reset only the current operation.
+     *
+     * This DOES NOT turn the mod OFF.
      */
     private static void resetState() {
 
@@ -801,7 +863,7 @@ public class AnvilPlusClient implements ClientModInitializer {
     }
 
     /*
-     * Display a colored message above the hotbar.
+     * Colored ActionBar message.
      */
     private static void actionBar(
             MinecraftClient client,
@@ -823,7 +885,9 @@ public class AnvilPlusClient implements ClientModInitializer {
     }
 
     /*
-     * Config file location.
+     * Config file:
+     *
+     * config/anvil_plus.properties
      */
     private static java.nio.file.Path configPath() {
 
@@ -834,7 +898,7 @@ public class AnvilPlusClient implements ClientModInitializer {
     }
 
     /*
-     * Load ON/OFF state from disk.
+     * Load saved ON/OFF state.
      */
     private static void loadConfig() {
 
@@ -866,7 +930,7 @@ public class AnvilPlusClient implements ClientModInitializer {
     }
 
     /*
-     * Save ON/OFF state to disk.
+     * Save ON/OFF state.
      */
     private static void saveConfig() {
 
