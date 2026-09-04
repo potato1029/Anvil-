@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "anvil_plus",
+  "version": "${version}",
+  "name": "Anvil Plus",
+  "description": "Client-side automation for enchanting Netherite Boots through a real Anvil.",
+  "authors": [
+    "Mahdi"
+  ],
+  "environment": "client",
+  "entrypoints": {
+    "client": [
+      "com.mahdi.anvilplus.AnvilPlusClient"
+    ]
+  },
+  "depends": {
+    "fabricloader": ">=0.18.0",
+    "minecraft": "1.21.11",
+    "java": ">=21",
+    "fabric-api": ">=0.141.0"
+  }
+}
