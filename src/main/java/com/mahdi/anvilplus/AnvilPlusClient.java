@@ -29,6 +29,10 @@ public class AnvilPlusClient implements ClientModInitializer {
     private static final String MOD_ID = "anvil_plus";
 
     /*
+     * =========================================================
+     * SPEED
+     * =========================================================
+     *
      * 3 ticks = approximately 150ms.
      */
     private static final int ACTION_DELAY_TICKS = 3;
@@ -44,11 +48,31 @@ public class AnvilPlusClient implements ClientModInitializer {
     private static KeyBinding enchantPlusKey;
 
     /*
-     * These can ONLY be changed by their keybinds.
-     * Errors or insufficient XP NEVER turn them OFF.
+     * =========================================================
+     * ENABLE STATES
+     * =========================================================
+     *
+     * These are completely independent.
+     *
+     * Neither feature is automatically disabled because of:
+     *
+     * - insufficient XP
+     * - missing book
+     * - incompatible enchantment
+     * - closing the Anvil
+     * - no suitable item
+     * - Too Expensive
+     *
+     * They can ONLY be changed by their own keybind.
      */
     private static boolean anvilPlusEnabled = true;
     private static boolean enchantPlusEnabled = false;
+
+    /*
+     * =========================================================
+     * COMMON STATE
+     * =========================================================
+     */
 
     private static AnvilScreenHandler lastHandler;
     private static int delay = 0;
@@ -56,30 +80,92 @@ public class AnvilPlusClient implements ClientModInitializer {
     private static Stage stage = Stage.IDLE;
 
     /*
-     * Anvil Plus boot task.
+     * =========================================================
+     * ANVIL PLUS - BOOT DATA
+     * =========================================================
      */
+
     private static ItemStack selectedBoot = ItemStack.EMPTY;
     private static ItemStack selectedBootBook = ItemStack.EMPTY;
 
     /*
-     * Enchant Plus book task.
+     * =========================================================
+     * ENCHANT PLUS - BOOK DATA
+     * =========================================================
      */
+
     private static ItemStack selectedFirstBook = ItemStack.EMPTY;
     private static ItemStack selectedSecondBook = ItemStack.EMPTY;
 
+    /*
+     * =========================================================
+     * STAGES
+     * =========================================================
+     */
+
     private enum Stage {
+
         IDLE,
 
+        /*
+         * Anvil Plus
+         */
         BOOT_WAITING_FOR_BOOT,
         BOOT_WAITING_FOR_BOOK,
         BOOT_WAITING_FOR_OUTPUT,
         BOOT_WAITING_FOR_CLEAR,
 
+        /*
+         * Enchant Plus
+         */
         ENCHANT_WAITING_FOR_FIRST,
         ENCHANT_WAITING_FOR_SECOND,
         ENCHANT_WAITING_FOR_OUTPUT,
         ENCHANT_WAITING_FOR_CLEAR
     }
+
+    /*
+     * =========================================================
+     * ENCHANT PLUS PAIRS
+     * =========================================================
+     *
+     * Slot 1 -> Slot 2
+     *
+     * ONLY these combinations are allowed.
+     */
+
+    private static final BookPair[] ENCHANT_PLUS_PAIRS = {
+
+            /*
+             * Thorns III + Mending
+             */
+            new BookPair(
+                    Enchantments.THORNS,
+                    3,
+                    Enchantments.MENDING,
+                    1
+            ),
+
+            /*
+             * Blast Protection IV + Feather Falling IV
+             */
+            new BookPair(
+                    Enchantments.BLAST_PROTECTION,
+                    4,
+                    Enchantments.FEATHER_FALLING,
+                    4
+            ),
+
+            /*
+             * Depth Strider III + Unbreaking III
+             */
+            new BookPair(
+                    Enchantments.DEPTH_STRIDER,
+                    3,
+                    Enchantments.UNBREAKING,
+                    3
+            )
+    };
 
     private static class BookPair {
 
@@ -104,40 +190,18 @@ public class AnvilPlusClient implements ClientModInitializer {
     }
 
     /*
-     * EXACT combinations for Enchant Plus.
-     *
-     * LEFT = Anvil Slot 1
-     * RIGHT = Anvil Slot 2
+     * =========================================================
+     * INITIALIZATION
+     * =========================================================
      */
-    private static final BookPair[] ENCHANT_PLUS_PAIRS = {
-
-            new BookPair(
-                    Enchantments.THORNS,
-                    3,
-                    Enchantments.MENDING,
-                    1
-            ),
-
-            new BookPair(
-                    Enchantments.BLAST_PROTECTION,
-                    4,
-                    Enchantments.FEATHER_FALLING,
-                    4
-            ),
-
-            new BookPair(
-                    Enchantments.DEPTH_STRIDER,
-                    3,
-                    Enchantments.UNBREAKING,
-                    3
-            )
-    };
 
     @Override
     public void onInitializeClient() {
 
         /*
-         * Existing Anvil Plus toggle.
+         * ANVIL PLUS
+         *
+         * Default key = P
          */
         anvilPlusKey = KeyBindingHelper.registerKeyBinding(
                 new KeyBinding(
@@ -149,10 +213,9 @@ public class AnvilPlusClient implements ClientModInitializer {
         );
 
         /*
-         * New Enchant Plus toggle.
+         * ENCHANT PLUS
          *
-         * Default = O
-         * Can be changed from Minecraft Controls.
+         * Default key = O
          */
         enchantPlusKey = KeyBindingHelper.registerKeyBinding(
                 new KeyBinding(
@@ -170,6 +233,12 @@ public class AnvilPlusClient implements ClientModInitializer {
         );
     }
 
+    /*
+     * =========================================================
+     * MAIN TICK
+     * =========================================================
+     */
+
     private static void tick(MinecraftClient client) {
 
         /*
@@ -177,20 +246,30 @@ public class AnvilPlusClient implements ClientModInitializer {
          * ANVIL PLUS TOGGLE
          * =====================================================
          */
+
         while (anvilPlusKey.wasPressed()) {
 
             anvilPlusEnabled = !anvilPlusEnabled;
 
-            resetState();
+            /*
+             * Only stop the current Anvil Plus operation.
+             *
+             * Do NOT modify Enchant Plus.
+             */
+            resetAnvilPlusState();
+
             saveConfig();
 
             if (anvilPlusEnabled) {
+
                 actionBar(
                         client,
                         "Anvil Plus: ON",
                         0x55FF55
                 );
+
             } else {
+
                 actionBar(
                         client,
                         "Anvil Plus: OFF",
@@ -204,20 +283,30 @@ public class AnvilPlusClient implements ClientModInitializer {
          * ENCHANT PLUS TOGGLE
          * =====================================================
          */
+
         while (enchantPlusKey.wasPressed()) {
 
             enchantPlusEnabled = !enchantPlusEnabled;
 
-            resetState();
+            /*
+             * Only stop the current Enchant Plus operation.
+             *
+             * Do NOT modify Anvil Plus.
+             */
+            resetEnchantPlusState();
+
             saveConfig();
 
             if (enchantPlusEnabled) {
+
                 actionBar(
                         client,
                         "Enchant Plus: ON",
                         0xAA55FF
                 );
+
             } else {
+
                 actionBar(
                         client,
                         "Enchant Plus: OFF",
@@ -239,13 +328,13 @@ public class AnvilPlusClient implements ClientModInitializer {
         }
 
         /*
-         * Both systems work ONLY while an Anvil is open.
+         * Both systems work only while Anvil is open.
          *
-         * Closing the Anvil does NOT turn either feature OFF.
+         * Closing Anvil NEVER turns either feature OFF.
          */
         if (!(client.currentScreen instanceof AnvilScreen screen)) {
 
-            resetState();
+            resetOperationState();
 
             return;
         }
@@ -285,10 +374,11 @@ public class AnvilPlusClient implements ClientModInitializer {
                     );
 
             /*
-             * ==============================================
+             * ==================================================
              * ANVIL PLUS
-             * ==============================================
+             * ==================================================
              */
+
             case BOOT_WAITING_FOR_BOOT ->
                     putBootBook(
                             client,
@@ -312,10 +402,11 @@ public class AnvilPlusClient implements ClientModInitializer {
                     );
 
             /*
-             * ==============================================
+             * ==================================================
              * ENCHANT PLUS
-             * ==============================================
+             * ==================================================
              */
+
             case ENCHANT_WAITING_FOR_FIRST ->
                     putSecondEnchantBook(
                             client,
@@ -345,11 +436,12 @@ public class AnvilPlusClient implements ClientModInitializer {
      * TASK SELECTION
      * =========================================================
      *
-     * Enchant Plus gets priority.
+     * Enchant Plus has priority.
      *
-     * If no valid book pair exists,
-     * normal Anvil Plus may process boots.
+     * If there is no valid Enchant Plus pair,
+     * Anvil Plus gets a chance.
      */
+
     private static void chooseNextTask(
             MinecraftClient client,
             AnvilScreenHandler handler
@@ -363,7 +455,7 @@ public class AnvilPlusClient implements ClientModInitializer {
         }
 
         /*
-         * First try Enchant Plus.
+         * ENCHANT PLUS FIRST
          */
         if (enchantPlusEnabled) {
 
@@ -383,7 +475,7 @@ public class AnvilPlusClient implements ClientModInitializer {
         }
 
         /*
-         * Then try normal Anvil Plus.
+         * NORMAL ANVIL PLUS
          */
         if (anvilPlusEnabled) {
 
@@ -419,20 +511,9 @@ public class AnvilPlusClient implements ClientModInitializer {
     }
 
     /*
-     * Search ONLY for:
-     *
-     * Thorns III -> Mending
-     *
-     * Blast Protection IV -> Feather Falling IV
-     *
-     * Depth Strider III -> Unbreaking III
-     *
-     * It will NEVER intentionally pair:
-     *
-     * Thorns -> Unbreaking
-     * Blast Protection -> Mending
-     * etc.
+     * Search ONLY for the three requested combinations.
      */
+
     private static BookPairResult findEnchantPlusPair(
             MinecraftClient client
     ) {
@@ -473,12 +554,12 @@ public class AnvilPlusClient implements ClientModInitializer {
     }
 
     /*
-     * For safety, Enchant Plus only automatically uses a book
-     * containing EXACTLY ONE enchantment.
+     * Enchant Plus deliberately requires EXACTLY ONE
+     * enchantment on each source book.
      *
-     * This prevents an unexpected extra enchantment on a book
-     * from creating a combination you didn't request.
+     * This prevents accidental combinations.
      */
+
     private static int findExactSingleEnchantBook(
             MinecraftClient client,
             RegistryKey<Enchantment> wanted,
@@ -526,9 +607,6 @@ public class AnvilPlusClient implements ClientModInitializer {
         var enchantments =
                 EnchantmentHelper.getEnchantments(book);
 
-        /*
-         * Must contain exactly ONE enchantment.
-         */
         if (enchantments.getEnchantments().size() != 1) {
             return false;
         }
@@ -546,6 +624,10 @@ public class AnvilPlusClient implements ClientModInitializer {
 
         return false;
     }
+
+    /*
+     * Put first book into Anvil Slot 1.
+     */
 
     private static void startEnchantPair(
             MinecraftClient client,
@@ -565,9 +647,6 @@ public class AnvilPlusClient implements ClientModInitializer {
                         .getStack(pair.secondSlot)
                         .copy();
 
-        /*
-         * FIRST requested book goes into Anvil Slot 1.
-         */
         clickInventorySlot(
                 client,
                 handler,
@@ -580,6 +659,10 @@ public class AnvilPlusClient implements ClientModInitializer {
         delay =
                 ACTION_DELAY_TICKS;
     }
+
+    /*
+     * Put second book into Anvil Slot 2.
+     */
 
     private static void putSecondEnchantBook(
             MinecraftClient client,
@@ -609,22 +692,13 @@ public class AnvilPlusClient implements ClientModInitializer {
         if (secondSlot < 0) {
 
             /*
-             * Don't turn Enchant Plus OFF.
+             * NEVER disable Enchant Plus.
              */
-            actionBar(
-                    client,
-                    "Enchant Plus: Second book not found",
-                    0xFF5555
-            );
-
             delay = WAIT_TICKS;
 
             return;
         }
 
-        /*
-         * SECOND requested book -> Anvil Slot 2.
-         */
         clickInventorySlot(
                 client,
                 handler,
@@ -671,6 +745,15 @@ public class AnvilPlusClient implements ClientModInitializer {
                 ACTION_DELAY_TICKS;
     }
 
+    /*
+     * Wait for valid result and sufficient XP.
+     *
+     * IMPORTANT:
+     *
+     * If XP is insufficient, we WAIT.
+     * We do NOT turn OFF.
+     */
+
     private static void takeEnchantOutput(
             MinecraftClient client,
             AnvilScreenHandler handler
@@ -687,20 +770,10 @@ public class AnvilPlusClient implements ClientModInitializer {
                         .getStack();
 
         /*
-         * Not enough XP:
-         *
-         * Do NOT turn OFF.
-         * Leave both books inside the Anvil.
-         * Wait until XP becomes sufficient.
+         * Waiting for XP.
          */
         if (cost > client.player.experienceLevel
                 && cost <= 39) {
-
-            actionBar(
-                    client,
-                    "Enchant Plus: Waiting for XP...",
-                    0x5555FF
-            );
 
             delay = WAIT_TICKS;
 
@@ -708,30 +781,23 @@ public class AnvilPlusClient implements ClientModInitializer {
         }
 
         /*
-         * Too Expensive:
+         * Too expensive.
          *
-         * Still do NOT turn OFF.
+         * Keep Enchant Plus ON.
+         *
+         * We simply wait instead of disabling the feature.
          */
         if (cost > 39) {
-
-            actionBar(
-                    client,
-                    "Enchant Plus: Too Expensive!",
-                    0xFF5555
-            );
 
             delay = 20;
 
             return;
         }
 
+        /*
+         * Server has not calculated output yet.
+         */
         if (output.isEmpty()) {
-
-            actionBar(
-                    client,
-                    "Enchant Plus: Waiting for result...",
-                    0xAA55FF
-            );
 
             delay = WAIT_TICKS;
 
@@ -739,7 +805,7 @@ public class AnvilPlusClient implements ClientModInitializer {
         }
 
         /*
-         * Take combined enchanted book.
+         * Take actual server-authoritative result.
          */
         client.interactionManager.clickSlot(
                 handler.syncId,
@@ -788,7 +854,7 @@ public class AnvilPlusClient implements ClientModInitializer {
 
     /*
      * =========================================================
-     * ORIGINAL ANVIL PLUS - NETHERITE BOOTS
+     * ANVIL PLUS - NETHERITE BOOTS
      * =========================================================
      */
 
@@ -803,6 +869,16 @@ public class AnvilPlusClient implements ClientModInitializer {
 
             return;
         }
+
+        /*
+         * IMPORTANT:
+         *
+         * findNextBoot() already skips boots that cannot
+         * receive another useful enchantment.
+         *
+         * This means one bad/already-completed boot does NOT
+         * stop the entire automation.
+         */
 
         int bootSlot =
                 findNextBoot(client);
@@ -841,6 +917,9 @@ public class AnvilPlusClient implements ClientModInitializer {
                         .getStack(bookSlot)
                         .copy();
 
+        /*
+         * Boot -> Anvil Slot 1.
+         */
         clickInventorySlot(
                 client,
                 handler,
@@ -881,17 +960,17 @@ public class AnvilPlusClient implements ClientModInitializer {
 
         if (bookSlot < 0) {
 
-            actionBar(
-                    client,
-                    "Anvil Plus: Book not found",
-                    0xFF5555
-            );
-
+            /*
+             * Do NOT turn Anvil Plus OFF.
+             */
             delay = WAIT_TICKS;
 
             return;
         }
 
+        /*
+         * Book -> Anvil Slot 2.
+         */
         clickInventorySlot(
                 client,
                 handler,
@@ -938,6 +1017,12 @@ public class AnvilPlusClient implements ClientModInitializer {
                 ACTION_DELAY_TICKS;
     }
 
+    /*
+     * Wait for XP if necessary.
+     *
+     * NEVER disable Anvil Plus.
+     */
+
     private static void takeBootOutput(
             MinecraftClient client,
             AnvilScreenHandler handler
@@ -954,37 +1039,33 @@ public class AnvilPlusClient implements ClientModInitializer {
                         .getStack();
 
         /*
-         * Wait for XP.
+         * Not enough XP.
          *
-         * NEVER automatically turn Anvil Plus OFF.
+         * Stay here until XP is sufficient.
          */
         if (cost > client.player.experienceLevel
                 && cost <= 39) {
-
-            actionBar(
-                    client,
-                    "Anvil Plus: Waiting for XP...",
-                    0xAA55FF
-            );
 
             delay = WAIT_TICKS;
 
             return;
         }
 
+        /*
+         * Too Expensive.
+         *
+         * Keep Anvil Plus enabled.
+         */
         if (cost > 39) {
-
-            actionBar(
-                    client,
-                    "Anvil Plus: Too Expensive!",
-                    0xFF5555
-            );
 
             delay = 20;
 
             return;
         }
 
+        /*
+         * No result yet.
+         */
         if (output.isEmpty()) {
 
             delay = WAIT_TICKS;
@@ -992,6 +1073,9 @@ public class AnvilPlusClient implements ClientModInitializer {
             return;
         }
 
+        /*
+         * Take actual Anvil result.
+         */
         client.interactionManager.clickSlot(
                 handler.syncId,
                 AnvilScreenHandler.OUTPUT_ID,
@@ -1037,6 +1121,16 @@ public class AnvilPlusClient implements ClientModInitializer {
                 ACTION_DELAY_TICKS;
     }
 
+    /*
+     * =========================================================
+     * FIND NETHERITE BOOT
+     * =========================================================
+     *
+     * Search entire player inventory.
+     *
+     * Hotbar and main inventory are both included.
+     */
+
     private static int findNextBoot(
             MinecraftClient client
     ) {
@@ -1056,8 +1150,8 @@ public class AnvilPlusClient implements ClientModInitializer {
             }
 
             /*
-             * Skip a boot if none of the available books
-             * can add anything new to it.
+             * If this boot has no useful book,
+             * SKIP IT and continue searching.
              */
             if (findUsefulBootBook(
                     client,
@@ -1070,6 +1164,12 @@ public class AnvilPlusClient implements ClientModInitializer {
 
         return -1;
     }
+
+    /*
+     * =========================================================
+     * FIND USEFUL BOOT BOOK
+     * =========================================================
+     */
 
     private static int findUsefulBootBook(
             MinecraftClient client,
@@ -1102,6 +1202,12 @@ public class AnvilPlusClient implements ClientModInitializer {
         return -1;
     }
 
+    /*
+     * =========================================================
+     * CHECK BOOT ENCHANTMENT
+     * =========================================================
+     */
+
     private static boolean hasUsefulBootEnchantment(
             ItemStack boot,
             ItemStack book
@@ -1116,6 +1222,9 @@ public class AnvilPlusClient implements ClientModInitializer {
         for (RegistryEntry<Enchantment> entry :
                 bookEnchantments.getEnchantments()) {
 
+            /*
+             * Ignore enchantments outside the allowed list.
+             */
             if (!isAllowedBootEnchantment(entry)) {
                 continue;
             }
@@ -1127,12 +1236,16 @@ public class AnvilPlusClient implements ClientModInitializer {
                     bootEnchantments.getLevel(entry);
 
             /*
-             * Already same/higher enchantment -> skip it.
+             * If boot already has the same or higher level,
+             * this book is NOT useful for this boot.
              */
             if (bootLevel >= bookLevel) {
                 continue;
             }
 
+            /*
+             * Netherite Boots support this enchantment.
+             */
             if (!entry.value().isSupportedItem(boot)) {
                 continue;
             }
@@ -1142,6 +1255,22 @@ public class AnvilPlusClient implements ClientModInitializer {
 
         return false;
     }
+
+    /*
+     * =========================================================
+     * ALLOWED BOOT ENCHANTMENTS
+     * =========================================================
+     *
+     * ONLY:
+     *
+     * Unbreaking III
+     * Feather Falling IV
+     * Blast Protection IV
+     * Thorns III
+     * Depth Strider III
+     * Mending
+     * Soul Speed III
+     */
 
     private static boolean isAllowedBootEnchantment(
             RegistryEntry<Enchantment> entry
@@ -1172,7 +1301,7 @@ public class AnvilPlusClient implements ClientModInitializer {
 
     /*
      * =========================================================
-     * COMMON INVENTORY METHODS
+     * FIND EXACT BOOK
      * =========================================================
      */
 
@@ -1205,16 +1334,21 @@ public class AnvilPlusClient implements ClientModInitializer {
     }
 
     /*
+     * =========================================================
+     * INVENTORY -> ANVIL SLOT
+     * =========================================================
+     *
      * Player inventory:
      *
-     * 0-8   Hotbar
-     * 9-35  Main inventory
+     * 0-8   = Hotbar
+     * 9-35  = Main inventory
      *
      * Anvil handler:
      *
-     * 3-29  Main inventory
-     * 30-38 Hotbar
+     * 3-29  = Main inventory
+     * 30-38 = Hotbar
      */
+
     private static int inventoryToHandlerSlot(
             int inventorySlot
     ) {
@@ -1244,6 +1378,12 @@ public class AnvilPlusClient implements ClientModInitializer {
                 client.player
         );
     }
+
+    /*
+     * =========================================================
+     * ANVIL SLOT CHECKS
+     * =========================================================
+     */
 
     private static boolean isInputEmpty(
             AnvilScreenHandler handler
@@ -1290,6 +1430,12 @@ public class AnvilPlusClient implements ClientModInitializer {
                 .isEmpty();
     }
 
+    /*
+     * =========================================================
+     * STATE MANAGEMENT
+     * =========================================================
+     */
+
     private static void clearSelections() {
 
         selectedBoot =
@@ -1306,11 +1452,12 @@ public class AnvilPlusClient implements ClientModInitializer {
     }
 
     /*
-     * IMPORTANT:
+     * Reset only the current operation.
      *
-     * resetState() NEVER turns either feature OFF.
+     * Does NOT change ON/OFF states.
      */
-    private static void resetState() {
+
+    private static void resetOperationState() {
 
         lastHandler = null;
 
@@ -1322,8 +1469,56 @@ public class AnvilPlusClient implements ClientModInitializer {
     }
 
     /*
+     * Reset ONLY Anvil Plus operation.
+     *
+     * Enchant Plus remains untouched.
+     */
+
+    private static void resetAnvilPlusState() {
+
+        selectedBoot =
+                ItemStack.EMPTY;
+
+        selectedBootBook =
+                ItemStack.EMPTY;
+
+        if (stage == Stage.BOOT_WAITING_FOR_BOOT
+                || stage == Stage.BOOT_WAITING_FOR_BOOK
+                || stage == Stage.BOOT_WAITING_FOR_OUTPUT
+                || stage == Stage.BOOT_WAITING_FOR_CLEAR) {
+
+            stage = Stage.IDLE;
+            delay = ACTION_DELAY_TICKS;
+        }
+    }
+
+    /*
+     * Reset ONLY Enchant Plus operation.
+     *
+     * Anvil Plus remains untouched.
+     */
+
+    private static void resetEnchantPlusState() {
+
+        selectedFirstBook =
+                ItemStack.EMPTY;
+
+        selectedSecondBook =
+                ItemStack.EMPTY;
+
+        if (stage == Stage.ENCHANT_WAITING_FOR_FIRST
+                || stage == Stage.ENCHANT_WAITING_FOR_SECOND
+                || stage == Stage.ENCHANT_WAITING_FOR_OUTPUT
+                || stage == Stage.ENCHANT_WAITING_FOR_CLEAR) {
+
+            stage = Stage.IDLE;
+            delay = ACTION_DELAY_TICKS;
+        }
+    }
+
+    /*
      * =========================================================
-     * COLORED MESSAGES
+     * COLORED ACTION BAR
      * =========================================================
      */
 
@@ -1396,13 +1591,13 @@ public class AnvilPlusClient implements ClientModInitializer {
                                     )
                             );
 
-                /*
-                 * Compatibility with old config.
-                 */
                 } else if (line.startsWith(
                         "enabled="
                 )) {
 
+                    /*
+                     * Compatibility with old versions.
+                     */
                     anvilPlusEnabled =
                             Boolean.parseBoolean(
                                     line.substring(
